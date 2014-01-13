@@ -9,7 +9,7 @@ command-line = digits ws command
 let = <'LET '> variable-name <' = '> expression
 for = <'FOR '> variable-name <' = '> value <' TO '> value
 next = <'NEXT '> variable-name
-if = <'IF '> expression <' THEN '> command
+if = <'IF '> comparison-expression  <' THEN '> command
 goto = <'GOTO '> digits
 end = <'END'>
 read = <'READ '> variable-name <' '> expression
@@ -24,6 +24,8 @@ variable-name = #'[a-z][a-zA-Z0-9]*'
 <endln> = <'\n'>
 <ws> = <#'\\s+'>
 operator = '+'
+comparison = '='
+comparison-expression = expression ws comparison ws expression
 ")
 
 
@@ -85,7 +87,7 @@ operator = '+'
             (get-in env [:registers variable-name])
             (keyword (str "r" (inc (count (:registers env))))))
         new-env (assoc-in env [:registers variable-name] r)]
-    (expression-rewrite new-env label r thing)))
+    (assoc-in (expression-rewrite new-env label r thing) [0 :label] label)))
 
 (defmethod pass1 :for [env [_ [_ label] [_ [_ variable-name] [thing-type :as thing] [_ [_ _ [_ digits]]]]]]
   (case thing-type
@@ -150,6 +152,12 @@ operator = '+'
   (let [source (get-in env [:registers vn])]
     (vec
      (concat
+      [{:op :nop0
+        :operand1 :r0
+        :operand2 :r1
+        :operand3 :r2
+        :env env
+        :label label}]
       (expression-rewrite env nil :r30 exp)
       [{:op :sbco
         :operand1 source
@@ -159,15 +167,50 @@ operator = '+'
         :label nil
         :env env}]))))
 
+(defmethod pass1 :if [env [_ [_ label] [_ [_ a op b] thing]]]
+  (case [(second op) (first (second a)) (first (second b))]
+    ["=" :variable-name :value] (let [r (get-in env [:registers (second (second a))])
+                                      neq (gensym 'neq)]
+                                  (concat [{:op :ldi
+                                            :operand1 :r30
+                                            :operand2 (Long/parseLong
+                                                       (-> b second second last second)
+                                                       16)
+                                            :label nil
+                                            :env env}
+                                           {:op :qbne
+                                            :operand1 neq
+                                            :operand2 r
+                                            :operand3 :r30
+                                            :label label
+                                            :env env}]
+                                          (pass1 env [nil [_ nil] thing])
+                                          [{:op :nop0
+                                            :operand1 :r1
+                                            :operand2 :r2
+                                            :operand3 :r0
+                                            :env env
+                                            :label neq}]))))
+
+(defmethod pass1 :goto [env [_ [_ label] [_ [_ target-label]]]]
+  [{:op :qba
+    :operand1 target-label
+    :env env
+    :label label}])
+
 (defn resolve-labels [s]
   (let [idx (group-by :label s)]
     (for [instr s]
       (case (:op instr)
-        (:qbgt :qblt) (let [x (:operand1 instr)]
-                        (if (number? x)
-                          instr
-                          (assoc instr
-                            :operand1 (- (-> idx (get x) first :n) (:n instr)))))
+        (:qbgt :qblt :qbne :qba) (let [x (:operand1 instr)
+                                       target-instruction-number (-> idx (get x) first :n)]
+                                   (assert target-instruction-number
+                                           {:x x
+                                            '(get idx x) (get idx x)})
+                                   (if (number? x)
+                                     instr
+                                     (assoc instr
+                                       :operand1 (- (-> idx (get x) first :n) (:n instr)))))
         instr))))
 
 (defn f [s]
@@ -262,7 +305,6 @@ operator = '+'
             0x80)))
 
 (defmethod instrunction-to-int :nop0 [{:keys [operand1 operand2 operand3] :as i}]
-  (assert nil)
   (unchecked-int 0xe0e1e2a0))
 
 (defmethod instrunction-to-int :add [{:keys [operand1 operand2 operand3] :as i}]
@@ -314,13 +356,28 @@ operator = '+'
        (println)))
    :else (assert nil)))
 
+(defmethod instrunction-to-int :qbne [{:keys [operand1 operand2 operand3] :as i}]
+  (assert (contains? registers operand2))
+  (if (and (number? operand3) (number? operand1) (neg? operand1))
+    (do
+     (assert (> 256 operand3))
+     (bit-or (bit-or (bit-or (bit-shift-left operand1 24)
+                             (bit-shift-left (get registers operand2) 16))
+                     (bit-shift-left operand3 8))
+             0x6f))
+    (bit-or (bit-or (bit-or (bit-shift-left operand1 24)
+                            (bit-shift-left (get registers operand2) 16))
+                    (bit-shift-left (get registers operand3) 8))
+            0x6e)))
+
+(defmethod instrunction-to-int :qba [{:keys [operand1] :as i}]
+  (bit-or (bit-shift-left operand1 24) 0x7f))
+
 (defmethod instrunction-to-int :halt [_]
   (unchecked-int 0x0000002a))
 
 (defn compile-basic [source]
   (let [ins (f (parse source))
-        _ (doseq [i ins]
-            (prn i))
         ins (map instrunction-to-int ins)
         baos (java.io.ByteArrayOutputStream. (* 4 (count ins)))
         out (java.io.DataOutputStream. baos)]
@@ -376,6 +433,33 @@ operator = '+'
 10 FOR number = 0x0 TO 0x10
 40 NEXT number
 50 WRITE number 0x0
+60 END
+")
+
+    (compile-basic
+     "
+00 LET total = 0x0
+01 LET temp = 0x0
+02 LET offset = 0x0
+03 LET eight = 0x8
+10 FOR number = 0x0 TO 0x6
+11   READ temp offset
+12   LET total = total + temp
+13   LET offset = offset + eight
+40 NEXT number
+50 WRITE number 0x0
+60 END
+")
+
+
+        (compile-basic
+     "
+00 LET n = 0x0
+01 LET one = 0x1
+02 LET n = n + one
+03 IF n = 0x5 THEN GOTO 50
+04 GOTO 02
+50 WRITE n 0x0
 60 END
 ")
 

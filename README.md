@@ -22,7 +22,6 @@ prubasic.core>   (compile-basic
 71 WRITE fib 0x0
 80 END
 ")
--102494105
 #<byte[] [B@572c0127>
 prubasic.core> 
 ```

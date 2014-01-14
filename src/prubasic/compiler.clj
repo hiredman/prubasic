@@ -259,7 +259,7 @@
                                  disj
                                  available-registers
                                  (vals (:register-allocation (:env r))))]
-        {:available-registers available-registers #_(into available-registers (remove keyword? (vals new-free-registers)))
+        {:available-registers (into available-registers (remove keyword? (vals new-free-registers)))
          :result (conj result r)}))
     {:available-registers registers
      :result []}
@@ -280,6 +280,7 @@
                                             (assoc instr
                                               :operand1 (- (-> idx (get x) first :n) (:n instr)))))
          instr)))))
+
 (comment
   (prubasic.codegen/code-gen
    (resolve-labels

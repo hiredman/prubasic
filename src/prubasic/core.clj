@@ -1,36 +1,5 @@
 (ns prubasic.core
-  (:require [instaparse.core :as insta]))
-
-(def basic-g
-  "
-<program> = [endln] program | command-line endln program | command-line [endln]
-command-line = digits ws command
-<command> = let | for | next | if | goto | end | read | write
-let = <'LET '> variable-name <' = '> expression
-for = <'FOR '> variable-name <' = '> value <' TO '> value
-next = <'NEXT '> variable-name
-if = <'IF '> comparison-expression  <' THEN '> command
-goto = <'GOTO '> digits
-end = <'END'>
-read = <'READ '> variable-name <' '> expression
-write = <'WRITE '> variable-name <' '> expression
-
-expression = value | variable-name | expression ws operator ws expression
-value = hex-number
-hex-number = '0x' hex-digits
-hex-digits = #'[a-fA-F0-9]+'
-digits = #'[0-9]+'
-variable-name = #'[a-z][a-zA-Z0-9]*'
-<endln> = <'\n'>
-<ws> = <#'\\s+'>
-operator = '+'
-comparison = '=' | '>' | '<'
-comparison-expression = expression ws comparison ws expression
-")
-
-
-(def parse (insta/parser basic-g))
-
+  (:require [prubasic.parser :refer [parse]]))
 
 ;; http://glind.customer.netspace.net.au/gwbas-17.html
 
@@ -54,7 +23,9 @@ comparison-expression = expression ws comparison ws expression
    :operand1 target-register
    :operand2 constant
    :env env
-   :label label})
+   :label label
+   :reads #{}
+   :writes #{target-register}})
 
 (defn add [target-register source-one source-two env & [label]]
   {:op :add
@@ -62,14 +33,18 @@ comparison-expression = expression ws comparison ws expression
    :operand2 source-one
    :operand3 source-two
    :env env
-   :label label})
+   :label label
+   :reads #{source-one source-two}
+   :writes #{target-register}})
 
 (defn mov [target-register source-register env & [label]]
   {:op :mov
    :operand1 target-register
    :operand2 source-register
    :env env
-   :label label})
+   :label label
+   :reads #{source-register}
+   :writes #{target-register}})
 
 (defn qbgt [target-label test-register constant env & [label]]
   {:op :qbgt
@@ -77,12 +52,18 @@ comparison-expression = expression ws comparison ws expression
    :operand2 test-register
    :operand3 constant
    :env env
-   :label label})
+   :label label
+   :writes #{}
+   :reads (if (number? constant)
+            #{test-register}
+            #{test-register constant})})
 
 (defn halt [env & [label]]
   {:op :halt
    :env env
-   :label label})
+   :label label
+   :reads #{}
+   :writes #{}})
 
 (defn nop0 [env & [label]]
   {:op :nop0
@@ -90,7 +71,9 @@ comparison-expression = expression ws comparison ws expression
    :operand2 :r1
    :operand3 :r2
    :env env
-   :label label})
+   :label label
+   :reads #{}
+   :writes #{}})
 
 (defn sbco [source constant offset width env & [label]]
   {:op :sbco
@@ -99,7 +82,9 @@ comparison-expression = expression ws comparison ws expression
    :operand3 offset
    :operand4 width
    :label label
-   :env env})
+   :env env
+   :reads #{source offset}
+   :writes #{}})
 
 (defn qbne [label test-register test env & [label]]
   {:op :qbne
@@ -107,7 +92,11 @@ comparison-expression = expression ws comparison ws expression
    :operand2 test-register
    :operand3 test
    :label label
-   :env env})
+   :env env
+   :reads (if (number? test)
+            #{test-register}
+            #{test-register test})
+   :writes #{}})
 
 (defn qbge [label test-register test env & [label]]
   {:op :qbge
@@ -115,7 +104,11 @@ comparison-expression = expression ws comparison ws expression
    :operand2 test-register
    :operand3 test
    :label label
-   :env env})
+   :env env
+   :reads (if (number? test)
+            #{test-register}
+            #{test-register test})
+   :writes #{}})
 
 (defn expression-rewrite [env label target-r x]
   (loop [to-push (seq (expression-to-stack env x))

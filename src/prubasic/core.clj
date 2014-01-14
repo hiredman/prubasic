@@ -24,7 +24,7 @@ variable-name = #'[a-z][a-zA-Z0-9]*'
 <endln> = <'\n'>
 <ws> = <#'\\s+'>
 operator = '+'
-comparison = '='
+comparison = '=' | '>' | '<'
 comparison-expression = expression ws comparison ws expression
 ")
 
@@ -49,6 +49,74 @@ comparison-expression = expression ws comparison ws expression
                               (expression-to-stack env b))
                         [(keyword op)]))))
 
+(defn ldi [target-register constant env & [label]]
+  {:op :ldi
+   :operand1 target-register
+   :operand2 constant
+   :env env
+   :label label})
+
+(defn add [target-register source-one source-two env & [label]]
+  {:op :add
+   :operand1 target-register
+   :operand2 source-one
+   :operand3 source-two
+   :env env
+   :label label})
+
+(defn mov [target-register source-register env & [label]]
+  {:op :mov
+   :operand1 target-register
+   :operand2 source-register
+   :env env
+   :label label})
+
+(defn qbgt [target-label test-register constant env & [label]]
+  {:op :qbgt
+   :operand1 target-label
+   :operand2 test-register
+   :operand3 constant
+   :env env
+   :label label})
+
+(defn halt [env & [label]]
+  {:op :halt
+   :env env
+   :label label})
+
+(defn nop0 [env & [label]]
+  {:op :nop0
+   :operand1 :r1
+   :operand2 :r1
+   :operand3 :r2
+   :env env
+   :label label})
+
+(defn sbco [source constant offset width env & [label]]
+  {:op :sbco
+   :operand1 source
+   :operand2 constant
+   :operand3 offset
+   :operand4 width
+   :label label
+   :env env})
+
+(defn qbne [label test-register test env & [label]]
+  {:op :qbne
+   :operand1 label
+   :operand2 test-register
+   :operand3 test
+   :label label
+   :env env})
+
+(defn qbge [label test-register test env & [label]]
+  {:op :qbge
+   :operand1 label
+   :operand2 test-register
+   :operand3 test
+   :label label
+   :env env})
+
 (defn expression-rewrite [env label target-r x]
   (loop [to-push (seq (expression-to-stack env x))
          stack []
@@ -56,37 +124,32 @@ comparison-expression = expression ws comparison ws expression
          result []]
     (if (empty? to-push)
       (if (keyword? (peek stack))
-        (conj result {:op :mov
-                      :operand1 target-r
-                      :operand2 (peek stack)
-                      :env env
-                      :label label})
-        (conj result {:op :ldi
-                      :operand1 target-r
-                      :operand2 (peek stack)
-                      :env env
-                      :label label}))
+        (conj result (mov target-r (peek stack) env))
+        (conj result (ldi target-r (peek stack) env)))
       (let [[x & xs] to-push]
         (case x
           :+ (let [a (peek stack)
                    stack (pop stack)
                    b (peek stack)
                    stack (pop stack)
-                   stack (conj stack :r30)]
-               (recur xs stack nil (conj result
-                                         {:op :add
-                                          :operand1 :r30
-                                          :operand2 a
-                                          :operand3 b
-                                          :env env
-                                          :label nil})))
+                   stack (conj stack :r2)]
+               (recur xs stack nil (into result
+                                         (cond
+                                          (and (keyword? a) (keyword? b)) [(add :r2 a b env)]
+                                          (keyword? a) [(ldi :r2 b env) (add :r2 :r2 a env)]
+                                          (keyword? b) [(ldi :r2 a env) (add :r2 :r2 b env)]
+                                          :else [(ldi :r2 a env) (ldi :r1 b env) (add :r2 :r2 :r1 env)]))))
           (recur xs (conj stack x) nil result))))))
 
+(defn find-register [env name]
+  (let [r (if (contains? (:registers env)  name)
+            (get-in env [:registers name])
+            (keyword (str "r" (+ 3 (count (:registers env))))))
+        env (assoc-in env [:registers name] r)]
+    [r env]))
+
 (defmethod pass1 :let [env [_ [_ label] [_ [_ variable-name] [thing-type :as thing]] :as command-line]]
-  (let [r (if (contains? (:registers env)  variable-name)
-            (get-in env [:registers variable-name])
-            (keyword (str "r" (inc (count (:registers env))))))
-        new-env (assoc-in env [:registers variable-name] r)]
+  (let [[r new-env] (find-register env variable-name)]
     (assoc-in (expression-rewrite new-env label r thing) [0 :label] label)))
 
 (defmethod pass1 :for [env [_ [_ label] [_ [_ variable-name] [thing-type :as thing] [_ [_ _ [_ digits]]]]]]
@@ -96,101 +159,72 @@ comparison-expression = expression ws comparison ws expression
                  limit (Long/parseLong digits 16)
                  next-target (gensym 'for)
                  end (gensym 'forend)
-                 r (keyword (str "r" (inc (count (:registers env)))))
-                 new-env (assoc-in env [:registers variable-name] r)
+                 [r new-env] (find-register env variable-name)
                  new-env (assoc-in new-env [:for r :target] next-target)
                  new-env (assoc-in new-env [:for r :limit] limit)]
-             [{:op :ldi
-               :operand1 r
-               :operand2 thing
-               :env new-env
-               :label label}
-              {:op :mov
-               :operand1 :r0
-               :operand2 :r0
-               :env new-env
-               :label next-target}])))
+             [(ldi r thing new-env label)
+              ;; nop
+              (mov :r1 :r1 new-env next-target)])))
 
 (defmethod pass1 :next [env [_ [_ label] [_ [_ vn]]]]
   (assert (contains? (:registers env) vn) vn)
-  [{:op :ldi
-    :operand1 :r30
-    :operand2 1
-    :env env
-    :label label}
-   {:op :add
-    :operand1 (get-in env [:registers vn])
-    :operand2 (get-in env [:registers vn])
-    :operand3 :r30
-    :env env
-    :label nil}
-   {:op :qbgt
-    :operand1 (get-in env [:for (get-in env [:registers vn]) :target])
-    :operand2 (get-in env [:registers vn])
-    :operand3 (get-in env [:for (get-in env [:registers vn]) :limit])
-    :env env
-    :label nil}])
+  [(ldi :r1 1 env label)
+   (add (get-in env [:registers vn]) (get-in env [:registers vn]) :r2 env)
+   (qbgt (get-in env [:for (get-in env [:registers vn]) :target])
+         (get-in env [:registers vn])
+         (get-in env [:for (get-in env [:registers vn]) :limit])
+         env)])
 
 (def PRU0-ARM-INTERRUPT 19)
 
 (defmethod pass1 :end [env [_ [_ label]]]
-  [{:op :mov
-    :operand1 :r0
-    :operand2 :r0
-    :env env
-    :label label}
-   {:op :ldi
-    :operand1 :r31.b0
-    :operand2 (+ PRU0-ARM-INTERRUPT 16)
-    :env env
-    :label nil}
-   {:op :halt
-    :env env
-    :label nil}])
+  [(mov :r1 :r1 env)
+   (ldi :r31.b0 (+ PRU0-ARM-INTERRUPT 16) env)
+   (halt env)])
 
 (defmethod pass1 :write [env [_ [_ label] [_ [_ vn] exp]]]
   (let [source (get-in env [:registers vn])]
     (vec
      (concat
-      [{:op :nop0
-        :operand1 :r0
-        :operand2 :r1
-        :operand3 :r2
-        :env env
-        :label label}]
-      (expression-rewrite env nil :r30 exp)
-      [{:op :sbco
-        :operand1 source
+      [(nop0 env label)]
+      (expression-rewrite env nil :r2 exp)
+      [(sbco source :c24 :r2 0x4 env)]))))
+
+(defmethod pass1 :read [env [_ [_ label] [_ [_ vn] exp]]]
+  (let [[dest new-env] (find-register env vn)]
+    (vec
+     (concat
+      [(nop0 new-env label)]
+      (expression-rewrite new-env nil :r2 exp)
+      [{:op :lbco
+        :operand1 dest
         :operand2 :c24
-        :operand3 :r30
+        :operand3 :r2
         :operand4 0x4
         :label nil
-        :env env}]))))
+        :env new-env}]))))
 
+;; TODO: expressionize using :r1 and :r2
 (defmethod pass1 :if [env [_ [_ label] [_ [_ a op b] thing]]]
   (case [(second op) (first (second a)) (first (second b))]
     ["=" :variable-name :value] (let [r (get-in env [:registers (second (second a))])
-                                      neq (gensym 'neq)]
-                                  (concat [{:op :ldi
-                                            :operand1 :r30
-                                            :operand2 (Long/parseLong
-                                                       (-> b second second last second)
-                                                       16)
-                                            :label nil
-                                            :env env}
-                                           {:op :qbne
-                                            :operand1 neq
-                                            :operand2 r
-                                            :operand3 :r30
-                                            :label label
-                                            :env env}]
+                                      neq (gensym 'neq)
+                                      const (Long/parseLong
+                                             (-> b second second last second)
+                                             16)]
+                                  (concat [(ldi :r2 const env label)
+                                           (qbne neq r :r2 env)]
                                           (pass1 env [nil [_ nil] thing])
-                                          [{:op :nop0
-                                            :operand1 :r1
-                                            :operand2 :r2
-                                            :operand3 :r0
-                                            :env env
-                                            :label neq}]))))
+                                          [(nop0 env neq)]))
+    ["<" :variable-name :value] (let [r (get-in env [:registers (second (second a))])
+                                      neq (gensym 'neq)
+                                      const (Long/parseLong
+                                             (-> b second second last second)
+                                             16)]
+                                  (concat [(ldi :r2 const env label)
+                                           (qbge neq r :r2 env)]
+                                          (pass1 env [nil [_ nil] thing])
+                                          [(nop0 env neq)]))))
 
 (defmethod pass1 :goto [env [_ [_ label] [_ [_ target-label]]]]
   [{:op :qba
@@ -202,15 +236,15 @@ comparison-expression = expression ws comparison ws expression
   (let [idx (group-by :label s)]
     (for [instr s]
       (case (:op instr)
-        (:qbgt :qblt :qbne :qba) (let [x (:operand1 instr)
-                                       target-instruction-number (-> idx (get x) first :n)]
-                                   (assert target-instruction-number
-                                           {:x x
-                                            '(get idx x) (get idx x)})
-                                   (if (number? x)
-                                     instr
-                                     (assoc instr
-                                       :operand1 (- (-> idx (get x) first :n) (:n instr)))))
+        (:qbgt :qblt :qbne :qba :qbge) (let [x (:operand1 instr)
+                                             target-instruction-number (-> idx (get x) first :n)]
+                                         (assert target-instruction-number
+                                                 {:x x
+                                                  '(get idx x) (get idx x)})
+                                         (if (number? x)
+                                           instr
+                                           (assoc instr
+                                             :operand1 (- (-> idx (get x) first :n) (:n instr)))))
         instr))))
 
 (defn f [s]
@@ -219,7 +253,7 @@ comparison-expression = expression ws comparison ws expression
     #(assoc %2 :n %1)
     (concat
      [{:op :ldi
-       :operand1 :r0
+       :operand1 :r1
        :operand2 0x0
        :env {}
        :label nil}
@@ -234,7 +268,7 @@ comparison-expression = expression ws comparison ws expression
        :env {}
        :label nil}
       {:op :sbbo
-       :operand1 :r0
+       :operand1 :r1
        :operand2 :r1
        :operand3 0x0
        :operand4 0x4
@@ -245,8 +279,7 @@ comparison-expression = expression ws comparison ws expression
        (fn [result command-line]
          (let [e (:env (peek result))]
            (into result (pass1 e command-line))))
-       [{:env {:registers {"foo" :r0}
-               :for {}}}] s))))))
+       [{:env {:registers {} :for {}}}] s))))))
 
 (def registers
   (merge (into {} (for [i (range 32)]
@@ -304,12 +337,25 @@ comparison-expression = expression ws comparison ws expression
                     (bit-shift-left r3 8))
             0x80)))
 
+(defmethod instrunction-to-int :lbco [{:keys [operand1 operand2 operand3 operand4] :as i}]
+  (assert (contains? registers [:bo1 operand1]) [:bo1 operand1])
+  (assert (contains? constants operand2) operand2)
+  (assert (contains? registers operand3))
+  (assert (= 4 operand4))
+  (let [r1 (get registers [:bo1 operand1])
+        r2 (get constants operand2)
+        r3 (get registers operand3)]
+    (bit-or (bit-or (bit-or (bit-shift-left r1 24)
+                            (bit-shift-left r2 16))
+                    (bit-shift-left r3 8))
+            0x90)))
+
 (defmethod instrunction-to-int :nop0 [{:keys [operand1 operand2 operand3] :as i}]
   (unchecked-int 0xe0e1e2a0))
 
 (defmethod instrunction-to-int :add [{:keys [operand1 operand2 operand3] :as i}]
   (assert (contains? registers operand1))
-  (assert (contains? registers operand2))
+  (assert (contains? registers operand2) operand2)
   (assert (contains? registers operand3) operand3)
   (let [r1 (get registers operand1)
         r2 (get registers operand2)
@@ -356,15 +402,30 @@ comparison-expression = expression ws comparison ws expression
        (println)))
    :else (assert nil)))
 
+(defmethod instrunction-to-int :qbge [{:keys [operand1 operand2 operand3] :as i}]
+  (if (and (number? operand3) (number? operand1) (neg? operand1))
+    (do
+      (assert nil)
+      (assert (> 256 operand3))
+      (doto (bit-or (bit-or (bit-or (bit-shift-left operand1 24)
+                                    (bit-shift-left (get registers operand2) 16))
+                            (bit-shift-left operand3 8))
+                    0x76)
+        (println)))
+    (bit-or (bit-or (bit-or (bit-shift-left operand1 24)
+                            (bit-shift-left (get registers operand2) 16))
+                    (bit-shift-left (get registers operand3) 8))
+            0x76)))
+
 (defmethod instrunction-to-int :qbne [{:keys [operand1 operand2 operand3] :as i}]
   (assert (contains? registers operand2))
   (if (and (number? operand3) (number? operand1) (neg? operand1))
     (do
-     (assert (> 256 operand3))
-     (bit-or (bit-or (bit-or (bit-shift-left operand1 24)
-                             (bit-shift-left (get registers operand2) 16))
-                     (bit-shift-left operand3 8))
-             0x6f))
+      (assert (> 256 operand3))
+      (bit-or (bit-or (bit-or (bit-shift-left operand1 24)
+                              (bit-shift-left (get registers operand2) 16))
+                      (bit-shift-left operand3 8))
+              0x6f))
     (bit-or (bit-or (bit-or (bit-shift-left operand1 24)
                             (bit-shift-left (get registers operand2) 16))
                     (bit-shift-left (get registers operand3) 8))
@@ -436,8 +497,8 @@ comparison-expression = expression ws comparison ws expression
 60 END
 ")
 
-    (compile-basic
-     "
+  (compile-basic
+   "
 00 LET total = 0x0
 01 LET temp = 0x0
 02 LET offset = 0x0
@@ -452,8 +513,8 @@ comparison-expression = expression ws comparison ws expression
 ")
 
 
-        (compile-basic
-     "
+  (compile-basic
+   "
 00 LET n = 0x0
 01 LET one = 0x1
 02 LET n = n + one
@@ -464,4 +525,43 @@ comparison-expression = expression ws comparison ws expression
 ")
 
 
+  (compile-basic
+   "
+00 READ n 0x0
+10 LET temp = 0x0
+20 LET fib = 0x1
+30 FOR number = 0x1 TO n
+40   LET pair = temp + fib
+50   LET temp = fib
+60   LET fib = pair
+70 NEXT number
+71 WRITE fib 0x0
+80 END
+")
+
+
+  (compile-basic
+   "
+00 READ n 0x0
+10 LET temp = 0x0
+20 LET fib = 0x1
+30 LET number = 0x1
+40 LET pair = temp + fib
+50 LET temp = fib
+60 LET fib = pair
+70 LET number = number + 0x1
+80 IF number < 0x16 THEN GOTO 40
+71 WRITE fib 0x0
+80 END
+")
+
+
+  (compile-basic
+   "
+10 LET one = 0x1
+20 LET two = 0x2
+30 IF one < 0x2 THEN WRITE one 0x0
+40 IF two < 0x1 THEN WRITE two 0x0
+50 END
+")
   )

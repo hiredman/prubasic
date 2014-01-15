@@ -43,7 +43,7 @@ the BASIC dialect has 8 commands:
 READ/WRITE are for writing to the PRU's data ram, which can be used to
 communicate results or pass arguments. They take a variable to be
 written to and an offset to read/write from, offsets are in bytes, so
-for 32bit ints use units of eight.
+for 32bit ints use units of 4.
 
 Speaking of variables, the compiler just maps names to registers, so
 don't use more than 28 variables (the compiler uses a few of the 32

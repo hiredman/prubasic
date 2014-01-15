@@ -59,6 +59,38 @@
             #{test-register}
             #{test-register constant})})
 
+(defn qblt [target-label test-register constant env & [label]]
+  {:op :qblt
+   :operand1 target-label
+   :operand2 test-register
+   :operand3 constant
+   :env env
+   :label label
+   :writes #{}
+   :reads (if (number? constant)
+            #{test-register}
+            #{test-register constant})})
+
+(defn jmp [target-label env & [label]]
+  {:op :jmp
+   :operand1 target-label
+   :env env
+   :label label
+   :writes #{}
+   :reads #{}})
+
+(defn qbeq [target-label test-register constant env & [label]]
+  {:op :qbeq
+   :operand1 target-label
+   :operand2 test-register
+   :operand3 constant
+   :env env
+   :label label
+   :writes #{}
+   :reads (if (number? constant)
+            #{test-register}
+            #{test-register constant})})
+
 (defn halt [env & [label]]
   {:op :halt
    :env env

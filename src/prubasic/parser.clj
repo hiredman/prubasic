@@ -56,7 +56,7 @@ variable-name = #'[a-z][a-zA-Z0-9]*'
 <endln> = <'\n'>
 <ws> = <#'\\s+'>
 operator = '+'
-comparison = '=' | '>' | '<'
+comparison = '=' | '>' | '<' | '<>' | '>=' | '<='
 comparison-expression = expression ws comparison ws expression
 ")
 

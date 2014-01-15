@@ -1,6 +1,6 @@
 (ns prubasic.compiler
   (:require [prubasic.parser :refer [parse2]]
-            [prubasic.core :refer [ldi add mov qbgt nop0 sbco halt]]
+            [prubasic.core :refer [ldi add mov qbgt nop0 sbco halt qblt qbeq jmp]]
             [prubasic.passes.registers :refer [allocate-registers]]))
 
 ;; http://glind.customer.netspace.net.au/gwbas-17.html
@@ -100,10 +100,7 @@
       [(sbco vn :c24 temp 0x4 env)]))))
 
 (defmethod analyze :goto [env [_ [_ [_ vn] exp]]]
-  [{:op :jmp
-    :operand1 vn
-    :reads #{}
-    :writes #{}}])
+  [(jmp vn env)])
 
 (defmethod analyze :label [env [_ [_ [_ label]]]]
   [(nop0 env label)])
@@ -122,13 +119,15 @@
             (expression-rewrite env br b)
             (case op
               ">" (concat
-                   [{:op :qbgt
-                     :operand1 else
-                     :operand2 br
-                     :operand3 ar
-                     :env env
-                     :reads #{ar br}
-                     :writes #{}}]
+                   [(qbgt else br ar env)]
+                   (analyze env [nil then])
+                   [(nop0 env else)])
+              "<" (concat
+                   [(qblt else br ar env)]
+                   (analyze env [nil then])
+                   [(nop0 env else)])
+              "=" (concat
+                   [(qbeq else br ar env)]
                    (analyze env [nil then])
                    [(nop0 env else)])))))
 

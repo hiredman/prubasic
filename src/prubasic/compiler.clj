@@ -182,7 +182,7 @@
                                      (assert inst)
                                      (into last-reads (set (:last-reads inst))))
                                    (assoc-in ast [i :last-reads] #{})))))
-         (:ldi :sbbo :nop0 :halt) ast))
+         (:ldi :sbbo :nop0 :halt :mov :add :sbco) ast))
      ast
      ast)))
 
@@ -202,7 +202,7 @@
                                                  instr
                                                  (assoc instr
                                                    :operand1 (- (-> idx (get x) first :n) (:n instr)))))
-         (:ldi :sbbo :nop0 :halt) instr)))))
+         (:ldi :sbbo :nop0 :halt :mov :add :sbco) instr)))))
 
 (comment
   (prubasic.codegen/code-gen

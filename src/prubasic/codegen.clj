@@ -150,6 +150,9 @@
 (defmethod instrunction-to-int :qba [{:keys [operand1] :as i}]
   (bit-or (bit-shift-left operand1 24) 0x7f))
 
+(defmethod instrunction-to-int :jmp [{:keys [operand1] :as i}]
+  (bit-or (bit-shift-left operand1 16) 0x12))
+
 (defmethod instrunction-to-int :halt [_]
   (unchecked-int 0x0000002a))
 

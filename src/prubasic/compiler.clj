@@ -99,6 +99,15 @@
       (expression-rewrite env temp exp)
       [(sbco vn :c24 temp 0x4 env)]))))
 
+(defmethod analyze :goto [env [_ [_ [_ vn] exp]]]
+  [{:op :jmp
+    :operand1 vn
+    :reads #{}
+    :writes #{}}])
+
+(defmethod analyze :label [env [_ [_ [_ label]]]]
+  [(nop0 env label)])
+
 (def PRU0-ARM-INTERRUPT 19)
 
 (defmethod analyze :end [env [_]]
@@ -162,20 +171,18 @@
      (fn [ast command-line]
        (assert ast)
        (case (:op command-line)
-         (:qbgt) (let [n (get-in n-by-label [(:operand1 command-line) 0 1])]
-                   (assert (> (:n command-line) n) "loops jump backwards")
-                   (assert (pos? n) command-line)
-                   (loop [i n
-                          last-reads #{}
-                          ast ast]
-                     (if (= i (:n command-line))
-                       (update-in ast [i :last-reads] (fnil into #{}) last-reads)
-                       (recur (inc i)
-                              (let [inst (nth ast i)]
-                                (assert inst)
-                                (into last-reads (set (:last-reads inst))))
-                              (assoc-in ast [i :last-reads] #{})))))
-         ast))
+         (:qbgt :jmp) (let [n (get-in n-by-label [(:operand1 command-line) 0 1])]
+                        (loop [i (min n (:n command-line))
+                               last-reads #{}
+                               ast ast]
+                          (if (= i (max n (:n command-line)))
+                            (update-in ast [i :last-reads] (fnil into #{}) last-reads)
+                            (recur (inc i)
+                                   (let [inst (nth ast i)]
+                                     (assert inst)
+                                     (into last-reads (set (:last-reads inst))))
+                                   (assoc-in ast [i :last-reads] #{})))))
+         (:ldi :sbbo :nop0 :halt) ast))
      ast
      ast)))
 
@@ -186,16 +193,16 @@
     (vec
      (for [instr s]
        (case (:op instr)
-         (:qbgt :qblt :qbne :qba :qbge) (let [x (:operand1 instr)
-                                              target-instruction-number (-> idx (get x) first :n)]
-                                          (assert target-instruction-number
-                                                  {:x x
-                                                   '(get idx x) (get idx x)})
-                                          (if (number? x)
-                                            instr
-                                            (assoc instr
-                                              :operand1 (- (-> idx (get x) first :n) (:n instr)))))
-         instr)))))
+         (:qbgt :qblt :qbne :qba :qbge :jmp) (let [x (:operand1 instr)
+                                                   target-instruction-number (-> idx (get x) first :n)]
+                                               (assert target-instruction-number
+                                                       {:x x
+                                                        '(get idx x) (get idx x)})
+                                               (if (number? x)
+                                                 instr
+                                                 (assoc instr
+                                                   :operand1 (- (-> idx (get x) first :n) (:n instr)))))
+         (:ldi :sbbo :nop0 :halt) instr)))))
 
 (comment
   (prubasic.codegen/code-gen
@@ -219,29 +226,6 @@ WRITE fib 0x0
 END
 "))))))))
 
-    (prubasic.codegen/code-gen
-   (resolve-labels
-    (allocate-registers
-     (shift-last-reads-out-of-loops
-      (number-instructions
-       (tag-last-usage
-        (analyze-program
-         {}
-         (parse2
-          "
-10 LET temp = 0x0
-20 LET fib = 0x1
-30 FOR number = 0x1 TO 0x10
-40   LET pair = temp + fib
-50   LET temp = fib
-60   LET fib = pair
-70 NEXT number
-71 WRITE fib 0x0
-80 END
-"))))))))
-
-
-
   (prubasic.codegen/code-gen
    (resolve-labels
     (allocate-registers
@@ -252,10 +236,9 @@ END
          {}
          (parse2
           "
-30 FOR number = 0x1 TO 0x10
-70 NEXT number
-71 WRITE number 0x0
-80 END
+GOTO FOO
+FOO:
+END
 "))))))))
 
 

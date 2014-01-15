@@ -57,6 +57,10 @@
   {:post [(every? (complement keyword?) (keys (:register-allocation (:env %))))]}
   (update-in instr [:env :register-allocation] merge allocations))
 
+(defmethod allocate-registers-for-instruction :jmp [registers allocations instr]
+  {:post [(every? (complement keyword?) (keys (:register-allocation (:env %))))]}
+  (update-in instr [:env :register-allocation] merge allocations))
+
 (defmethod allocate-registers-for-instruction :sbco [registers allocations instr]
   (assert (contains? allocations (:operand1 instr)) (:operand1 instr))
   (let [[r1 r2] (seq registers)]

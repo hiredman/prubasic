@@ -87,9 +87,9 @@
    :reads #{source offset}
    :writes #{}})
 
-(defn qbne [label test-register test env & [label]]
+(defn qbne [target-label test-register test env & [label]]
   {:op :qbne
-   :operand1 label
+   :operand1 target-label
    :operand2 test-register
    :operand3 test
    :label label
@@ -99,9 +99,9 @@
             #{test-register test})
    :writes #{}})
 
-(defn qbge [label test-register test env & [label]]
+(defn qbge [target-label test-register test env & [label]]
   {:op :qbge
-   :operand1 label
+   :operand1 target-label
    :operand2 test-register
    :operand3 test
    :label label

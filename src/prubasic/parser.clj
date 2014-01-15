@@ -34,17 +34,19 @@ comparison-expression = expression ws comparison ws expression
 (def basic-g2
   "
 <program> = [endln] program | command-line endln program | command-line [endln]
-command-line = digits ws command
-<command> = let | for | next | if | goto | end | read | write
+command-line = <[ws]> command
+<command> = let | for | next | if | goto | end | read | write | label
 let = <'LET '> variable-name <' = '> expression
 for = <'FOR '> variable-name <' = '> value <' TO '> value
 next = <'NEXT '> variable-name
 if = <'IF '> comparison-expression  <' THEN '> command
-goto = <'GOTO '> digits
+goto = <'GOTO '> label-name
 end = <'END'>
 read = <'READ '> variable-name <' '> expression
 write = <'WRITE '> variable-name <' '> expression
+label = label-name ':'
 
+label-name = #'[A-Z][A-Z0-9]+'
 expression = value | variable-name | expression ws operator ws expression
 value = hex-number
 hex-number = '0x' hex-digits

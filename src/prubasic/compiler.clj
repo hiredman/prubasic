@@ -8,7 +8,7 @@
 (def registers (set (for [i (range 1 31)] (keyword (str "r" i)))))
 
 (def analyze nil)
-(defmulti analyze (fn [env [_ _ [command]]] command))
+(defmulti analyze (fn [env [_ [command]]] command))
 
 (defn linearize-expression [env [_ [thing-type :as thing] :as exp]]
   (case thing-type
@@ -68,10 +68,10 @@
           (recur xs (conj stack x) result))))))
 
 
-(defmethod analyze :let [env [_ [_ label] [_ [_ vn] expression]]]
-  (assoc-in (expression-rewrite env vn expression) [0 :label] label))
+(defmethod analyze :let [env [_ [_ [_ vn] expression]]]
+  (expression-rewrite env vn expression))
 
-(defmethod analyze :for [env [_ [_ label] [_ [_ variable-name] [thing-type :as thing] [_ [_ _ [_ digits]]]]]]
+(defmethod analyze :for [env [_ [_ [_ variable-name] [thing-type :as thing] [_ [_ _ [_ digits]]]]]]
   (case thing-type
     :value (let [[_ [_ _ [_ thing-digits]]] thing
                  thing (Long/parseLong thing-digits 16)
@@ -80,32 +80,29 @@
                  end (gensym 'forend)
                  new-env (assoc-in env [:for variable-name :target] next-target)
                  new-env (assoc-in new-env [:for variable-name :limit] limit)]
-             [(ldi variable-name thing new-env label)
-              ;; nop
-              (mov variable-name variable-name new-env next-target)])))
+             [(ldi variable-name thing new-env nil)
+              (nop0 new-env next-target)])))
 
-(defmethod analyze :next [env [_ [_ label] [_ [_ vn]]]]
+(defmethod analyze :next [env [_ [_ [_ vn]]]]
   (let [tmp (gensym 'temp)]
-    [(ldi tmp 1 env label)
+    [(ldi tmp 1 env nil)
      (add vn vn tmp env)
      (qbgt (get-in env [:for vn :target])
            vn
            (get-in env [:for vn :limit])
            (update-in env [:for] dissoc vn))]))
 
-(defmethod analyze :write [env [_ [_ label] [_ [_ vn] exp]]]
+(defmethod analyze :write [env [_ [_ [_ vn] exp]]]
   (let [temp (gensym 'tmp)]
     (vec
      (concat
-      [(nop0 env label)]
       (expression-rewrite env temp exp)
       [(sbco vn :c24 temp 0x4 env)]))))
 
 (def PRU0-ARM-INTERRUPT 19)
 
-(defmethod analyze :end [env [_ [_ label]]]
-  [(nop0 env label)
-   (ldi :r31.b0 (+ PRU0-ARM-INTERRUPT 16) env)
+(defmethod analyze :end [env [_]]
+  [(ldi :r31.b0 (+ PRU0-ARM-INTERRUPT 16) env)
    (halt env)])
 
 (def prelude
@@ -167,7 +164,7 @@
        (case (:op command-line)
          (:qbgt) (let [n (get-in n-by-label [(:operand1 command-line) 0 1])]
                    (assert (> (:n command-line) n) "loops jump backwards")
-                   (assert (pos? n))
+                   (assert (pos? n) command-line)
                    (loop [i n
                           last-reads #{}
                           ast ast]
@@ -202,6 +199,27 @@
 
 (comment
   (prubasic.codegen/code-gen
+   (resolve-labels
+    (allocate-registers
+     (shift-last-reads-out-of-loops
+      (number-instructions
+       (tag-last-usage
+        (analyze-program
+         {}
+         (parse2
+          "
+LET temp = 0x0
+LET fib = 0x1
+FOR number = 0x1 TO 0x10
+  LET pair = temp + fib
+  LET temp = fib
+  LET fib = pair
+NEXT number
+WRITE fib 0x0
+END
+"))))))))
+
+    (prubasic.codegen/code-gen
    (resolve-labels
     (allocate-registers
      (shift-last-reads-out-of-loops

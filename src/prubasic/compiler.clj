@@ -1,7 +1,8 @@
 (ns prubasic.compiler
   (:require [prubasic.parser :refer [parse2]]
-            [prubasic.core :refer [ldi add mov qbgt nop0 sbco halt qblt qbeq jmp]]
-            [prubasic.passes.registers :refer [allocate-registers]]))
+            [prubasic.operations :refer [ldi add mov qbgt nop0 sbco halt qblt qbeq jmp]]
+            [prubasic.passes.registers :refer [allocate-registers]]
+            [prubasic.codegen :refer [code-gen]]))
 
 ;; http://glind.customer.netspace.net.au/gwbas-17.html
 
@@ -220,6 +221,17 @@
                                                  (assoc instr
                                                    :operand1 (- (-> idx (get x) first :n) (:n instr)))))
          (:ldi :sbbo :nop0 :halt :mov :add :sbco) instr)))))
+
+(defn compile-basic [src]
+  (code-gen
+   (resolve-labels
+    (allocate-registers
+     (shift-last-reads-out-of-loops
+      (number-instructions
+       (tag-last-usage
+        (analyze-program
+         {}
+         (parse2 src)))))))))
 
 (comment
   (prubasic.codegen/code-gen

@@ -6,8 +6,6 @@
 
 ;; http://glind.customer.netspace.net.au/gwbas-17.html
 
-(def registers (set (for [i (range 1 31)] (keyword (str "r" i)))))
-
 (def analyze nil)
 (defmulti analyze (fn [env [_ [command]]] command))
 

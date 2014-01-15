@@ -114,6 +114,24 @@
   [(ldi :r31.b0 (+ PRU0-ARM-INTERRUPT 16) env)
    (halt env)])
 
+(defmethod analyze :if [env [_ [_ [_ a [_ op] b] then]]]
+  (let [ar (gensym 'a)
+        br (gensym 'b)
+        else (gensym 'else)]
+    (concat (expression-rewrite env ar a)
+            (expression-rewrite env br b)
+            (case op
+              ">" (concat
+                   [{:op :qbgt
+                     :operand1 else
+                     :operand2 br
+                     :operand3 ar
+                     :env env
+                     :reads #{ar br}
+                     :writes #{}}]
+                   (analyze env [nil then])
+                   [(nop0 env else)])))))
+
 (def prelude
   [{:op :ldi
     :operand1 :r1
@@ -171,17 +189,17 @@
      (fn [ast command-line]
        (assert ast)
        (case (:op command-line)
-         (:qbgt :jmp) (let [n (get-in n-by-label [(:operand1 command-line) 0 1])]
-                        (loop [i (min n (:n command-line))
-                               last-reads #{}
-                               ast ast]
-                          (if (= i (max n (:n command-line)))
-                            (update-in ast [i :last-reads] (fnil into #{}) last-reads)
-                            (recur (inc i)
-                                   (let [inst (nth ast i)]
-                                     (assert inst)
-                                     (into last-reads (set (:last-reads inst))))
-                                   (assoc-in ast [i :last-reads] #{})))))
+         (:qbgt :jmp :qbge) (let [n (get-in n-by-label [(:operand1 command-line) 0 1])]
+                              (loop [i (min n (:n command-line))
+                                     last-reads #{}
+                                     ast ast]
+                                (if (= i (max n (:n command-line)))
+                                  (update-in ast [i :last-reads] (fnil into #{}) last-reads)
+                                  (recur (inc i)
+                                         (let [inst (nth ast i)]
+                                           (assert inst)
+                                           (into last-reads (set (:last-reads inst))))
+                                         (assoc-in ast [i :last-reads] #{})))))
          (:ldi :sbbo :nop0 :halt :mov :add :sbco) ast))
      ast
      ast)))
@@ -236,12 +254,35 @@ END
          {}
          (parse2
           "
+LET x = 0x1
 GOTO FOO
+BAZ:
+LET x = x + 0x5
+GOTO BAR
 FOO:
+LET x = x + 0x3
+GOTO BAZ
+BAR:
+WRITE x 0x0
 END
 "))))))))
 
-
+  (prubasic.codegen/code-gen
+   (resolve-labels
+    (allocate-registers
+     (shift-last-reads-out-of-loops
+      (number-instructions
+       (tag-last-usage
+        (analyze-program
+         {}
+         (parse2
+          "
+LET one = 0x1
+LET two = 0x2
+IF one > two THEN WRITE one 0x0
+IF two > two THEN WRITE two 0x0
+END
+"))))))))
 
 
   )

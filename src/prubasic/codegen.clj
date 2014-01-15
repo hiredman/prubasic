@@ -109,15 +109,17 @@
 
 (defmethod instrunction-to-int :qbgt [{:keys [operand1 operand2 operand3] :as i}]
   (assert (contains? registers operand2))
-  (cond
-   (and (number? operand3) (number? operand1) (neg? operand1))
+  (if (and (number? operand3) (number? operand1) (neg? operand1))
    (do
      (assert (> 256 operand3))
      (bit-or (bit-or (bit-or (bit-shift-left operand1 24)
                              (bit-shift-left (get registers operand2) 16))
                      (bit-shift-left operand3 8))
              0x67))
-   :else (assert nil)))
+   (bit-or (bit-or (bit-or (bit-shift-left operand1 24)
+                           (bit-shift-left (get registers operand2) 16))
+                   (bit-shift-left (get registers operand3) 8))
+           0x60)))
 
 (defmethod instrunction-to-int :qbge [{:keys [operand1 operand2 operand3] :as i}]
   (if (and (number? operand3) (number? operand1) (neg? operand1))
@@ -131,7 +133,7 @@
     (bit-or (bit-or (bit-or (bit-shift-left operand1 24)
                             (bit-shift-left (get registers operand2) 16))
                     (bit-shift-left (get registers operand3) 8))
-            0x76)))
+            0x70)))
 
 (defmethod instrunction-to-int :qbne [{:keys [operand1 operand2 operand3] :as i}]
   (assert (contains? registers operand2))

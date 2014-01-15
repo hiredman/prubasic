@@ -46,8 +46,16 @@
 (defmethod allocate-registers-for-instruction :qbgt [registers allocations instr]
   {:post [(every? (complement keyword?) (keys (:register-allocation (:env %))))]}
   (assert (contains? allocations (:operand2 instr)) (:operand2 instr))
-  (let [[r1] (seq registers)]
-    (alloc r1 :operand2 allocations instr)))
+  (let [[r1 r2] (seq registers)]
+    (->> (alloc r1 :operand2 allocations instr)
+         (alloc r2 :operand3 allocations))))
+
+(defmethod allocate-registers-for-instruction :qbge [registers allocations instr]
+  {:post [(every? (complement keyword?) (keys (:register-allocation (:env %))))]}
+  (assert (contains? allocations (:operand2 instr)) (:operand2 instr))
+  (let [[r1 r2] (seq registers)]
+    (->> (alloc r1 :operand2 allocations instr)
+         (alloc r2 :operand3 allocations))))
 
 (defmethod allocate-registers-for-instruction :nop0 [registers allocations instr]
   {:post [(every? (complement keyword?) (keys (:register-allocation (:env %))))]}
